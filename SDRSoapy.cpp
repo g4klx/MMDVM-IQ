@@ -377,10 +377,12 @@ uint8_t CSDRSoapy::setParameters()
   SoapySDR::Kwargs rxArgs;
   SoapySDR::Kwargs txArgs;
 
+  // Default FDUDC parameters running 150k SPS
   unsigned int resampNum = 4U;
   unsigned int resampDen = 25U;
   size_t blockSize = 512U;
   size_t iqHWDelay = 10;
+  float cutoff = 0.5F;
 
   const unsigned int resampLen = 11U;
   const unsigned int rxIfNum = 1U, rxIfDen = 12U;
@@ -392,6 +394,13 @@ uint8_t CSDRSoapy::setParameters()
   if (m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0) {
     const char* uri = m_soapyDeviceURI.empty() ? PLUTO_DEFAULT_URI : m_soapyDeviceURI.c_str();
 
+    // PlutoSDR - running 300k SPS
+    resampNum = 2U;
+    resampDen = 25U;
+    blockSize = 1024U;
+    iqHWDelay = 10U;
+    cutoff = 0.25F;
+
     devArgs["driver"] = "plutosdr";
     rxArgs["uri"]     = uri;
 
@@ -401,10 +410,12 @@ uint8_t CSDRSoapy::setParameters()
   } else if (m_soapyDeviceType.compare("limesdr") == 0 || m_soapyDeviceType.compare("lime") == 0) {
     const char* uri = m_soapyDeviceURI.empty() ? LIME_DEFAULT_URI : m_soapyDeviceURI.c_str();
 
+    // LimeSDR Legacy - running 300k SPS
     resampNum = 2U;
-    resampDen = 50U;
-    blockSize = 2048U;
-    iqHWDelay = 50U;
+    resampDen = 25U;
+    blockSize = 1024U;
+    iqHWDelay = 10U;
+    cutoff = 0.25F;
 
     devArgs["driver"] = "lime";
     rxArgs["uri"]     = uri;
@@ -447,10 +458,12 @@ uint8_t CSDRSoapy::setParameters()
 
     LogMessage("Using Ettus USRP driver uri %s", uri);
   } else if (m_soapyDeviceType.compare("mucell") == 0) {
+    // mucell(sx1255) running 150k SPS
     resampNum = 4U;
     resampDen = 25U;
     blockSize = 512U;
     iqHWDelay = 10U;
+    cutoff = 0.5F;
 
     devArgs["driver"] = "mucell";
 
@@ -458,10 +471,12 @@ uint8_t CSDRSoapy::setParameters()
 
     LogMessage("Using muCell driver");
   } else {
+    // sxceiver(sx1255) running 150k SPS (default)
     resampNum = 4U;
     resampDen = 25U;
     blockSize = 512U;
     iqHWDelay = 10U;
+    cutoff = 0.5F;
 
     devArgs["driver"] = "sx";
 
@@ -480,7 +495,7 @@ uint8_t CSDRSoapy::setParameters()
 
   m_latencyNs = (long long)std::round(1e9 / samplerate * (double)(blockSize * LATENCY_BLOCKS));
 
-  m_fdudc = new CFDUDC(resampNum, resampDen, rxIfNum, rxIfDen, txIfNum, txIfDen, resampLen, 0.5F);
+  m_fdudc = new CFDUDC(resampNum, resampDen, rxIfNum, rxIfDen, txIfNum, txIfDen, resampLen, cutoff);
 
   m_soapyTXFreq     = double(m_txFreq)     - samplerate * double(txIfNum) / double(txIfDen);
   m_soapyPocsagFreq = double(m_pocsagFreq) - samplerate * double(txIfNum) / double(txIfDen);

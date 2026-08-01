@@ -66,17 +66,6 @@ private:
   unsigned short       m_modemPort;
 
   CTimer               m_txTimeout;
-
-  float                m_power;
-  uint32_t             m_txFreq;
-  uint32_t             m_rxFreq;
-  uint32_t             m_pocsagFreq;
-  float                m_rxGain;
-  float                m_txGain;
-
-  bool                 m_pocsag;
-
-  void setTXFrequency(bool pocsag);
 };
 
 #endif

@@ -28,6 +28,8 @@
 
 #include "SDRSoapy.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cassert>
 
@@ -39,6 +41,7 @@ const size_t RX_CHANNEL = 0;
 const size_t TX_CHANNEL = 0;
 
 const size_t LATENCY_BLOCKS = 3;
+const size_t LIBRE_TX_QUEUE_BLOCKS = 64;
 
 const int32_t FM_DEVIATION = 550000;
 
@@ -76,6 +79,14 @@ m_soapyDeviceURI(),
 m_device(nullptr),
 m_rxStream(nullptr),
 m_txStream(nullptr),
+m_useTXWorker(false),
+m_txWorker(),
+m_txQueueMutex(),
+m_txQueueCondition(),
+m_txQueue(),
+m_txWorkerRunning(false),
+m_txWorkerFailed(false),
+m_txQueueDrops(0U),
 m_pocsag(false)
 {
 }
@@ -100,6 +111,8 @@ bool CSDRSoapy::start(bool trace)
 
 void CSDRSoapy::stop()
 {
+  stopTXWorker();
+
   delete m_fdudc;
   m_fdudc = nullptr;
 
@@ -126,6 +139,248 @@ void CSDRSoapy::stop()
   m_device   = nullptr;
 
   m_soapyInit = false;
+}
+
+bool CSDRSoapy::writeTXBlock(const std::vector<std::complex<float>>& samples, int flags, long long timeNs)
+{
+  size_t samplesWritten = 0U;
+
+  while (samplesWritten < samples.size()) {
+    void* buffs[1] = {
+      const_cast<std::complex<float>*>(samples.data() + samplesWritten)
+    };
+
+    int chunkFlags = flags;
+    long long chunkTimeNs = timeNs;
+
+    // A timestamp applies to the first sample in the complete block only.
+    if (samplesWritten > 0U) {
+      chunkFlags &= ~SOAPY_SDR_HAS_TIME;
+      chunkTimeNs = 0LL;
+    }
+
+    const int ret = m_device->writeStream(
+      m_txStream, buffs, samples.size() - samplesWritten, chunkFlags, chunkTimeNs);
+
+    if (ret <= 0) {
+      LogError("TX stream error after %zu/%zu samples: %d (%s)",
+               samplesWritten, samples.size(), ret, SoapySDR_errToStr(ret));
+      return false;
+    }
+
+    samplesWritten += static_cast<size_t>(ret);
+  }
+
+  return true;
+}
+
+void CSDRSoapy::startTXWorker()
+{
+  if (!m_useTXWorker)
+    return;
+
+  stopTXWorker();
+
+  {
+    std::lock_guard<std::mutex> lock(m_txQueueMutex);
+    m_txQueue.clear();
+  }
+
+  m_txQueueDrops = 0U;
+  m_txWorkerFailed.store(false);
+  m_txWorkerRunning.store(true);
+  m_txWorker = std::thread(&CSDRSoapy::txWorkerLoop, this);
+}
+
+void CSDRSoapy::stopTXWorker()
+{
+  m_txWorkerRunning.store(false);
+  m_txQueueCondition.notify_all();
+
+  if (m_txWorker.joinable())
+    m_txWorker.join();
+
+  std::lock_guard<std::mutex> lock(m_txQueueMutex);
+  m_txQueue.clear();
+}
+
+void CSDRSoapy::enqueueTXBlock(const std::vector<std::complex<float>>& samples, int flags, long long timeNs)
+{
+  if (!m_useTXWorker || !m_txWorkerRunning.load() || m_txWorkerFailed.load())
+    return;
+
+  {
+    std::lock_guard<std::mutex> lock(m_txQueueMutex);
+
+    if (m_txQueue.size() >= LIBRE_TX_QUEUE_BLOCKS) {
+      m_txQueue.pop_front();
+      m_txQueueDrops++;
+
+      if (m_txQueueDrops == 1U || (m_txQueueDrops % 100U) == 0U)
+        LogError("LibreSDR TX queue overflow: dropped oldest block, total drops=%llu",
+                 static_cast<unsigned long long>(m_txQueueDrops));
+    }
+
+    m_txQueue.push_back({samples, flags, timeNs});
+  }
+
+  m_txQueueCondition.notify_one();
+}
+
+void CSDRSoapy::txWorkerLoop()
+{
+  using Clock = std::chrono::steady_clock;
+
+  bool diagnosticActive = false;
+  bool havePreviousWriteEnd = false;
+  Clock::time_point previousWriteEnd;
+  uint64_t blocks = 0U;
+  uint64_t calls = 0U;
+  uint64_t shortWrites = 0U;
+  uint64_t under2ms = 0U;
+  uint64_t from2to3ms = 0U;
+  uint64_t from3to5ms = 0U;
+  uint64_t from5to10ms = 0U;
+  uint64_t over10ms = 0U;
+  uint64_t startingDrops = 0U;
+  uint64_t latestDrops = 0U;
+  size_t maxQueueDepth = 0U;
+  double maxWriteMs = 0.0;
+  double maxSubmitGapMs = 0.0;
+
+  const auto finishDiagnostic = [&]() {
+    if (!diagnosticActive)
+      return;
+
+    LogMessage(
+      "LibreSDR TX worker diagnostic: blocks=%llu calls=%llu short_writes=%llu "
+      "queue_drops=%llu latency_lt2=%llu latency_2to3=%llu latency_3to5=%llu "
+      "latency_5to10=%llu latency_gt10=%llu max_write=%.3fms "
+      "max_submit_gap=%.3fms max_queue=%zu",
+      static_cast<unsigned long long>(blocks),
+      static_cast<unsigned long long>(calls),
+      static_cast<unsigned long long>(shortWrites),
+      static_cast<unsigned long long>(latestDrops - startingDrops),
+      static_cast<unsigned long long>(under2ms),
+      static_cast<unsigned long long>(from2to3ms),
+      static_cast<unsigned long long>(from3to5ms),
+      static_cast<unsigned long long>(from5to10ms),
+      static_cast<unsigned long long>(over10ms),
+      maxWriteMs, maxSubmitGapMs, maxQueueDepth);
+
+    diagnosticActive = false;
+    havePreviousWriteEnd = false;
+    blocks = calls = shortWrites = 0U;
+    under2ms = from2to3ms = from3to5ms = from5to10ms = over10ms = 0U;
+    startingDrops = latestDrops = 0U;
+    maxQueueDepth = 0U;
+    maxWriteMs = maxSubmitGapMs = 0.0;
+  };
+
+  while (m_txWorkerRunning.load()) {
+    TXBlock block;
+    size_t queueDepth = 0U;
+    uint64_t queueDrops = 0U;
+
+    {
+      std::unique_lock<std::mutex> lock(m_txQueueMutex);
+      m_txQueueCondition.wait(lock, [this]() {
+        return !m_txWorkerRunning.load() || !m_txQueue.empty();
+      });
+
+      if (!m_txWorkerRunning.load())
+        break;
+
+      block = std::move(m_txQueue.front());
+      m_txQueue.pop_front();
+      queueDepth = m_txQueue.size();
+      queueDrops = m_txQueueDrops;
+    }
+
+    const bool activeBlock = std::any_of(
+      block.samples.begin(), block.samples.end(),
+      [](const std::complex<float>& sample) {
+        return std::norm(sample) > 1.0e-12F;
+      });
+
+    if (activeBlock && !diagnosticActive) {
+      diagnosticActive = true;
+      startingDrops = latestDrops = queueDrops;
+      LogMessage("LibreSDR TX worker diagnostic started");
+    } else if (!activeBlock && diagnosticActive) {
+      latestDrops = queueDrops;
+      finishDiagnostic();
+    }
+
+    if (diagnosticActive) {
+      blocks++;
+      latestDrops = queueDrops;
+      maxQueueDepth = std::max(maxQueueDepth, queueDepth);
+    }
+
+    size_t samplesWritten = 0U;
+    while (samplesWritten < block.samples.size() && m_txWorkerRunning.load()) {
+      void* buffs[1] = {
+        static_cast<void*>(block.samples.data() + samplesWritten)
+      };
+      int chunkFlags = block.flags;
+      long long chunkTimeNs = block.timeNs;
+
+      if (samplesWritten > 0U) {
+        chunkFlags &= ~SOAPY_SDR_HAS_TIME;
+        chunkTimeNs = 0LL;
+      }
+
+      const size_t samplesRequested = block.samples.size() - samplesWritten;
+      const auto writeStart = Clock::now();
+
+      if (diagnosticActive && havePreviousWriteEnd) {
+        const double submitGapMs = std::chrono::duration<double, std::milli>(
+          writeStart - previousWriteEnd).count();
+        maxSubmitGapMs = std::max(maxSubmitGapMs, submitGapMs);
+      }
+
+      const int ret = m_device->writeStream(
+        m_txStream, buffs, samplesRequested, chunkFlags, chunkTimeNs);
+
+      const auto writeEnd = Clock::now();
+      const double writeMs = std::chrono::duration<double, std::milli>(
+        writeEnd - writeStart).count();
+
+      if (ret <= 0) {
+        LogError("LibreSDR TX worker error after %zu/%zu samples: %d (%s)",
+                 samplesWritten, block.samples.size(), ret, SoapySDR_errToStr(ret));
+        m_txWorkerFailed.store(true);
+        m_txWorkerRunning.store(false);
+        break;
+      }
+
+      if (diagnosticActive) {
+        calls++;
+        maxWriteMs = std::max(maxWriteMs, writeMs);
+        if (static_cast<size_t>(ret) < samplesRequested)
+          shortWrites++;
+
+        if (writeMs < 2.0)
+          under2ms++;
+        else if (writeMs < 3.0)
+          from2to3ms++;
+        else if (writeMs < 5.0)
+          from3to5ms++;
+        else if (writeMs < 10.0)
+          from5to10ms++;
+        else
+          over10ms++;
+
+        previousWriteEnd = writeEnd;
+        havePreviousWriteEnd = true;
+      }
+
+      samplesWritten += static_cast<size_t>(ret);
+    }
+  }
+
+  finishDiagnostic();
 }
 
 int CSDRSoapy::readRXSamples(RXSample* rxSamples) {
@@ -155,23 +410,27 @@ void CSDRSoapy::process()
     m_device->activateStream(m_rxStream);
     m_device->activateStream(m_txStream);
 
+    startTXWorker();
+
     if (!m_timestamped) {
       // Write initial zeros to transmit buffer to start streams
       for (size_t i = 0; i < m_buffer.size(); i++)
         m_buffer[i] = { 0.0F, 0.0F };
 
       for (size_t i = 0; i < LATENCY_BLOCKS; i++) {
-        void* buffs[1] = { (void*)m_buffer.data() };
-        int flags = 0;
-        int ret = m_device->writeStream(m_txStream, buffs, m_buffer.size(), flags);
-        if (ret <= 0) {
-          LogError("TX stream start error: %d (%s)", ret, SoapySDR_errToStr(ret));
+        if (m_useTXWorker)
+          enqueueTXBlock(m_buffer);
+        else if (!writeTXBlock(m_buffer))
           break;
-        }
       }
     }
 
     m_soapyInit = true;
+  }
+
+  if (m_useTXWorker && m_txWorkerFailed.load()) {
+    LogError("LibreSDR TX worker stopped; resetting Soapy streams");
+    m_soapyInit = false;
   }
 
   void *buffs[1] = {(void*)m_buffer.data()};
@@ -195,14 +454,14 @@ void CSDRSoapy::process()
       flags   = SOAPY_SDR_HAS_TIME;
     }
 
-    int ret = m_device->writeStream(m_txStream, buffs, m_buffer.size(), flags, timeNs);
-    if (ret <= 0) {
-      LogError("TX stream error: %d (%s)", ret, SoapySDR_errToStr(ret));
+    if (m_useTXWorker)
+      enqueueTXBlock(m_buffer, flags, timeNs);
+    else if (!writeTXBlock(m_buffer, flags, timeNs))
       m_soapyInit = false;
-    }
   }
 
   if (!m_soapyInit) {
+    stopTXWorker();
     m_device->deactivateStream(m_rxStream);
     m_device->deactivateStream(m_txStream);
     return;
@@ -213,7 +472,8 @@ void CSDRSoapy::process()
     m_tx = false;
     LogMessage("TX OFF");
 
-    if (m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0 ||
+    if (m_soapyDeviceType.compare("libresdr") == 0 ||
+        m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0 ||
         m_soapyDeviceType.compare("limesdr") == 0  || m_soapyDeviceType.compare("lime") == 0  ||
         m_soapyDeviceType.compare("limemini") == 0 || m_soapyDeviceType.compare("lime-mini") == 0 ||
         m_soapyDeviceType.compare("usrp") == 0)
@@ -233,6 +493,8 @@ void CSDRSoapy::processIQBlock()
   assert(m_fdudc != nullptr);
   assert(m_delayedTXBuffer != nullptr);
 
+  unsigned int txSourceUnderflows = 0U;
+
   // Mute the receiver when transmitting in simplex mode
   if (m_tx && !m_duplex) {
     for (auto& d : m_buffer)
@@ -241,7 +503,7 @@ void CSDRSoapy::processIQBlock()
 
   // Insert a channel filter here
 
-  m_fdudc->process(m_buffer, [this](std::complex<float> rxIQSample) {
+  m_fdudc->process(m_buffer, [this, &txSourceUnderflows](std::complex<float> rxIQSample) {
     std::complex<float> txIQSample = {0.0F, 0.0F};
     TXSample txSample = {0, MARK_NONE};
 
@@ -250,6 +512,8 @@ void CSDRSoapy::processIQBlock()
       m_phase += txSample.m_sample * FM_DEVIATION;
       float ph = m_phase * float(M_PI / 0x80000000UL);
       txIQSample = std::polar(m_power, ph);
+    } else if (m_useTXWorker && m_tx) {
+      txSourceUnderflows++;
     }
 
     // Demodulate RX
@@ -275,6 +539,29 @@ void CSDRSoapy::processIQBlock()
 
     return txIQSample;
   });
+
+  if (m_useTXWorker) {
+    static bool underflowActive = false;
+    static unsigned long long underflowSamples = 0ULL;
+    static unsigned long long underflowBlocks = 0ULL;
+
+    if (txSourceUnderflows > 0U) {
+      underflowSamples += txSourceUnderflows;
+      underflowBlocks++;
+
+      if (!underflowActive) {
+        underflowActive = true;
+        LogError("LibreSDR TX source underflow started: missing=%u samples in current block",
+                 txSourceUnderflows);
+      }
+    } else if (underflowActive) {
+      LogError("LibreSDR TX source underflow ended: missing=%llu samples across %llu blocks",
+               underflowSamples, underflowBlocks);
+      underflowActive = false;
+      underflowSamples = 0ULL;
+      underflowBlocks = 0ULL;
+    }
+  }
 }
 
 int CSDRSoapy::read(MMDVM_STATE mode, q15_t* samples, uint16_t* rssi, uint8_t* control) {
@@ -304,7 +591,8 @@ void CSDRSoapy::write(MMDVM_STATE mode, const q15_t* samples, uint16_t length, c
   if (!m_tx) {
       m_tx = true;
       LogMessage("TX ON");
-      if (m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0 ||
+      if (m_soapyDeviceType.compare("libresdr") == 0 ||
+          m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0 ||
           m_soapyDeviceType.compare("limesdr") == 0  || m_soapyDeviceType.compare("lime") == 0  ||
           m_soapyDeviceType.compare("limemini") == 0 || m_soapyDeviceType.compare("lime-mini") == 0 ||
           m_soapyDeviceType.compare("usrp") == 0) {
@@ -389,7 +677,26 @@ uint8_t CSDRSoapy::setParameters()
   const char* PLUTO_DEFAULT_URI = "ip:pluto.local";
   const char* LIME_DEFAULT_URI  = "index=0";         // eg: addr=1111:2222 or serial=xxxxxxxx
 
-  if (m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0) {
+  m_useTXWorker = false;
+
+  if (m_soapyDeviceType.compare("libresdr") == 0) {
+    const char* uri = m_soapyDeviceURI.empty() ? PLUTO_DEFAULT_URI : m_soapyDeviceURI.c_str();
+
+    // LibreSDR - running 1.2M SPS
+    resampNum = 1U;
+    resampDen = 50U;
+    blockSize = 4096U;
+    iqHWDelay = 10U;
+    cutoff = 0.25F;
+
+    devArgs["driver"] = "plutosdr";
+    rxArgs["uri"]     = uri;
+
+    m_timestamped = false;
+    m_useTXWorker = true;
+
+    LogMessage("Using LibreSDR profile with Pluto SDR driver uri %s", uri);
+  } else if (m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0) {
     const char* uri = m_soapyDeviceURI.empty() ? PLUTO_DEFAULT_URI : m_soapyDeviceURI.c_str();
 
     // PlutoSDR - running 300k SPS
@@ -513,10 +820,16 @@ uint8_t CSDRSoapy::setParameters()
     m_device->setSampleRate(SOAPY_SDR_RX, RX_CHANNEL, samplerate);
     m_device->setSampleRate(SOAPY_SDR_TX, TX_CHANNEL, samplerate);
 
+    LogMessage("  Actual RX Rate:   %.0f samples/sec",
+               m_device->getSampleRate(SOAPY_SDR_RX, RX_CHANNEL));
+    LogMessage("  Actual TX Rate:   %.0f samples/sec",
+               m_device->getSampleRate(SOAPY_SDR_TX, TX_CHANNEL));
+
     m_device->setFrequency(SOAPY_SDR_RX, RX_CHANNEL, m_soapyRXFreq);
     m_device->setFrequency(SOAPY_SDR_TX, TX_CHANNEL, m_soapyTXFreq);
 
-    if (m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0) {
+    if (m_soapyDeviceType.compare("libresdr") == 0 ||
+        m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0) {
       m_device->setAntenna(SOAPY_SDR_RX, RX_CHANNEL, "A_BALANCED");
       m_device->setAntenna(SOAPY_SDR_TX, TX_CHANNEL, "A");
 

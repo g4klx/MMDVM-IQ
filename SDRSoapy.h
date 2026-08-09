@@ -30,6 +30,12 @@
 #include "Socket.h"
 #include "FDUDC.h"
 
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 #include <SoapySDR/Device.hpp>
@@ -59,6 +65,12 @@ public:
   uint8_t setParameters();
 
 private:
+  struct TXBlock {
+    std::vector<std::complex<float>> samples;
+    int                              flags;
+    long long                        timeNs;
+  };
+
   bool                  m_trace = false;
 
   bool                  m_started = false;
@@ -98,9 +110,23 @@ private:
   SoapySDR::Stream*    m_rxStream;
   SoapySDR::Stream*    m_txStream;
 
+  bool                         m_useTXWorker;
+  std::thread                  m_txWorker;
+  std::mutex                   m_txQueueMutex;
+  std::condition_variable      m_txQueueCondition;
+  std::deque<TXBlock>          m_txQueue;
+  std::atomic<bool>            m_txWorkerRunning;
+  std::atomic<bool>            m_txWorkerFailed;
+  uint64_t                     m_txQueueDrops;
+
   bool                 m_pocsag;
 
   void processIQBlock();
+  bool writeTXBlock(const std::vector<std::complex<float>>& samples, int flags = 0, long long timeNs = 0LL);
+  void startTXWorker();
+  void stopTXWorker();
+  void enqueueTXBlock(const std::vector<std::complex<float>>& samples, int flags = 0, long long timeNs = 0LL);
+  void txWorkerLoop();
   void setTXFrequency(bool pocsag);
 };
 

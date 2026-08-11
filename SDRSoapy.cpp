@@ -472,10 +472,9 @@ uint8_t CSDRSoapy::setParameters()
     const char* uri = m_soapyDeviceURI.empty() ? LIME_DEFAULT_URI : m_soapyDeviceURI.c_str();
 
     resampNum = 2U;
-    resampDen = 25U;
-    blockSize = 1024U;
-    iqHWDelay = 10U;
-    cutoff = 0.25F;
+    resampDen = 50U;
+    blockSize = 2048U;
+    iqHWDelay = 50U;
 
     devArgs["driver"] = "lime";
     rxArgs["uri"]     = uri;
@@ -489,10 +488,9 @@ uint8_t CSDRSoapy::setParameters()
     const char* uri = m_soapyDeviceURI.empty() ? LIME_DEFAULT_URI : m_soapyDeviceURI.c_str();
 
     resampNum = 2U;
-    resampDen = 25U;
-    blockSize = 1024U;
-    iqHWDelay = 10U;
-    cutoff = 0.25F;
+    resampDen = 50U;
+    blockSize = 2048U;
+    iqHWDelay = 50U;
 
     devArgs["driver"] = "limesuiteng";
     rxArgs["uri"]     = uri;

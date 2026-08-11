@@ -50,8 +50,6 @@ public:
   void write(MMDVM_STATE mode, const q15_t* samples, uint16_t length, const uint8_t* control = NULL);
   int read(MMDVM_STATE mode, q15_t* samples, uint16_t* rssi, uint8_t* control);
 
-  int readRXSamples(RXSample* rxSamples);
-
   uint16_t getSpace() const;
 
   void setDeviceInfo(const std::string& type, const std::string& uri, unsigned int rxGain, unsigned int txGain);

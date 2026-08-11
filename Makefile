@@ -1,18 +1,19 @@
+# By default, SoapySDR support is enabled.
+# `USE_SOAPY=0 make` to disable SoapySDR interface but still with access to MMDVM-Multi.
+USE_SOAPY ?= 1
+
 #
 # To compile with a SoapySDR interface and access to MMDVM-Multi then use the following lines
 #
-CXX      = c++
-CXXFLAGS += -g -O3 -Wall -std=c++11 -fpermissive -MMD -MD -pthread -DUSE_SOAPY -DARM_MATH_RPI -Wno-narrowing -Wno-strict-aliasing
-LIBS     += -lpthread -lmosquitto -lSoapySDR
+CXX      ?= c++
+CXXFLAGS += -g -O3 -Wall -std=c++11 -fpermissive -MMD -MD -pthread -DARM_MATH_RPI -Wno-narrowing -Wno-strict-aliasing
+LIBS     += -lpthread -lmosquitto
 LDFLAGS  += -g -L/usr/local/lib
 
-#
-# To compile without a SoapySDR interface but still with access to MMDVM-Multi then use the following lines
-#
-#CXX      = c++
-#CXXFLAGS += -g -O3 -Wall -std=c++11 -fpermissive -MMD -MD -pthread -DARM_MATH_RPI -Wno-narrowing -Wno-strict-aliasing
-#LIBS     += -lpthread -lmosquitto
-#LDFLAGS  += -g -L/usr/local/lib
+ifeq ($(USE_SOAPY), 1)
+	CXXFLAGS+= -DUSE_SOAPY=1
+	LIBS+= -lSoapySDR
+endif
 
 ifeq ($(shell uname -s),Darwin)
 	CFLAGS+= -I/opt/homebrew/include -Wno-c++11-narrowing

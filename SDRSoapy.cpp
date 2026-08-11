@@ -242,7 +242,7 @@ void CSDRSoapy::process()
         m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0 ||
         m_soapyDeviceType.compare("limesdr") == 0  || m_soapyDeviceType.compare("lime") == 0  ||
         m_soapyDeviceType.compare("limemini") == 0 || m_soapyDeviceType.compare("lime-mini") == 0 ||
-        m_soapyDeviceType.compare("usrp") == 0)
+        m_soapyDeviceType.compare("usrp") == 0 || m_soapyDeviceType.compare("limepsb") == 0)
       m_device->setGain(SOAPY_SDR_TX, TX_CHANNEL, 1.0);
     else
       m_device->setAntenna(SOAPY_SDR_TX, TX_CHANNEL, "NONE");
@@ -334,7 +334,7 @@ void CSDRSoapy::write(MMDVM_STATE mode, const q15_t* samples, uint16_t length, c
           m_soapyDeviceType.compare("plutosdr") == 0 || m_soapyDeviceType.compare("pluto") == 0 ||
           m_soapyDeviceType.compare("limesdr") == 0  || m_soapyDeviceType.compare("lime") == 0  ||
           m_soapyDeviceType.compare("limemini") == 0 || m_soapyDeviceType.compare("lime-mini") == 0 ||
-          m_soapyDeviceType.compare("usrp") == 0) {
+          m_soapyDeviceType.compare("usrp") == 0 || m_soapyDeviceType.compare("limepsb") == 0) {
         m_device->setGain(SOAPY_SDR_TX, TX_CHANNEL, m_txGain);
       } else {
         m_device->setAntenna(SOAPY_SDR_TX, TX_CHANNEL, "TX");
@@ -472,9 +472,10 @@ uint8_t CSDRSoapy::setParameters()
     const char* uri = m_soapyDeviceURI.empty() ? LIME_DEFAULT_URI : m_soapyDeviceURI.c_str();
 
     resampNum = 2U;
-    resampDen = 50U;
-    blockSize = 2048U;
-    iqHWDelay = 50U;
+    resampDen = 25U;
+    blockSize = 1024U;
+    iqHWDelay = 10U;
+    cutoff = 0.25F;
 
     devArgs["driver"] = "lime";
     rxArgs["uri"]     = uri;
@@ -484,6 +485,23 @@ uint8_t CSDRSoapy::setParameters()
     m_timestamped = true;
 
     LogMessage("Using LimeSDR-mini driver uri %s", uri);
+  } else if (m_soapyDeviceType.compare("limepsb") == 0) {
+    const char* uri = m_soapyDeviceURI.empty() ? LIME_DEFAULT_URI : m_soapyDeviceURI.c_str();
+
+    resampNum = 2U;
+    resampDen = 25U;
+    blockSize = 1024U;
+    iqHWDelay = 10U;
+    cutoff = 0.25F;
+
+    devArgs["driver"] = "limesuiteng";
+    rxArgs["uri"]     = uri;
+    rxArgs["latency"] = "0";
+    txArgs["latency"] = "0";
+
+    m_timestamped = true;
+
+    LogMessage("Using LimeSuiteNG driver uri %s", uri);
   } else if (m_soapyDeviceType.compare("usrp") == 0) {
     const char* uri = m_soapyDeviceURI.c_str();
 
@@ -582,6 +600,12 @@ uint8_t CSDRSoapy::setParameters()
     } else if (m_soapyDeviceType.compare("limemini") == 0 || m_soapyDeviceType.compare("lime-mini") == 0) {
       m_device->setAntenna(SOAPY_SDR_RX, RX_CHANNEL, "Auto");
       m_device->setAntenna(SOAPY_SDR_TX, TX_CHANNEL, "Auto");
+
+      m_device->setGain(SOAPY_SDR_RX, RX_CHANNEL, m_rxGain);
+      m_device->setGain(SOAPY_SDR_TX, TX_CHANNEL, m_txGain);
+    } else if (m_soapyDeviceType.compare("limepsb") == 0) {
+      m_device->setAntenna(SOAPY_SDR_RX, RX_CHANNEL, "LNAW");
+      m_device->setAntenna(SOAPY_SDR_TX, TX_CHANNEL, "Band2");
 
       m_device->setGain(SOAPY_SDR_RX, RX_CHANNEL, m_rxGain);
       m_device->setGain(SOAPY_SDR_TX, TX_CHANNEL, m_txGain);

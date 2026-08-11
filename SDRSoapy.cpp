@@ -490,7 +490,7 @@ uint8_t CSDRSoapy::setParameters()
     resampNum = 2U;
     resampDen = 50U;
     blockSize = 2048U;
-    iqHWDelay = 50U;
+    iqHWDelay = 10U;
 
     devArgs["driver"] = "limesuiteng";
     rxArgs["uri"]     = uri;

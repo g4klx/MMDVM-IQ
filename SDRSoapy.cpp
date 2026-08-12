@@ -5,6 +5,7 @@
  *   Copyright (C) 2015 by Jim Mclaughlin KI6ZUM
  *   Copyright (C) 2026 by Adrian Musceac YO8RZZ
  *   Copyright (C) 2026 by Shawn Chain BG5HHP
+ *   Copyright (C) 2026 by Steve Miller KC1AWV
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -206,13 +207,42 @@ void CSDRSoapy::process()
   long long timeNs = 0LL;
 
   if (m_soapyInit) {
-    int flags = 0;
-    int ret = m_device->readStream(m_rxStream, buffs, m_buffer.size(), flags, timeNs);
-    if (ret > 0) {
-      processIQBlock();
+    if (m_soapyDeviceType.compare("usrp") == 0) {
+      // Local testing has shown the N210 delivers samples in smaller Ethernet
+      // packets. Collect multiple packets into one larger application buffer
+      // before processing and transmitting. This reduces processing overhead
+      // and prevents unfilled parts of the buffer from being treated as new
+      // sample data.
+      size_t samplesRead = 0U;
+
+      while (samplesRead < m_buffer.size() && m_soapyInit) {
+        void* rxBuffs[1] = {m_buffer.data() + samplesRead};
+        int flags = 0;
+        const int ret = m_device->readStream(
+          m_rxStream, rxBuffs, m_buffer.size() - samplesRead, flags, timeNs);
+
+        if (ret > 0) {
+          samplesRead += static_cast<size_t>(ret);
+        } else {
+          LogError("RX stream error after %zu/%zu samples: %d (%s)",
+                   samplesRead, m_buffer.size(), ret, SoapySDR_errToStr(ret));
+          m_soapyInit = false;
+        }
+      }
+
+      if (m_soapyInit)
+        processIQBlock();
     } else {
-      LogError("RX stream error: %d (%s)", ret, SoapySDR_errToStr(ret));
-      m_soapyInit = false;
+      int flags = 0;
+      const int ret = m_device->readStream(
+        m_rxStream, buffs, m_buffer.size(), flags, timeNs);
+
+      if (ret > 0) {
+        processIQBlock();
+      } else {
+        LogError("RX stream error: %d (%s)", ret, SoapySDR_errToStr(ret));
+        m_soapyInit = false;
+      }
     }
   }
 
@@ -485,21 +515,24 @@ uint8_t CSDRSoapy::setParameters()
 
     LogMessage("Using LimeSDR-mini driver uri %s", uri);
   } else if (m_soapyDeviceType.compare("usrp") == 0) {
-    const char* uri = m_soapyDeviceURI.c_str();
-
-    resampNum = 2U;
-    resampDen = 50U;
-    blockSize = 2048U;
+    
+    // Ettus USRP - running 1M SPS
+    resampNum = 3U;
+    resampDen = 125U;
+    blockSize = 4096U;
     iqHWDelay = 50U;
+    cutoff = 0.45F;
 
     devArgs["driver"] = "uhd";
-    rxArgs["uri"]     = uri;
-    txArgs["uri"]     = uri;
-    rxArgs["recv_frame_size"] = "1024";
+    
+    if (!m_soapyDeviceURI.empty()) {
+      const SoapySDR::Kwargs uriArgs = SoapySDR::KwargsFromString(m_soapyDeviceURI);
+      devArgs.insert(uriArgs.begin(), uriArgs.end());
+    }
 
-    m_timestamped = true;
+    m_timestamped = false;
 
-    LogMessage("Using Ettus USRP driver uri %s", uri);
+    LogMessage("Using Ettus USRP driver args %s", m_soapyDeviceURI.empty() ? "(default)" : m_soapyDeviceURI.c_str());
   } else if (m_soapyDeviceType.compare("mucell") == 0) {
     // mucell(sx1255) running 150k SPS
     resampNum = 4U;

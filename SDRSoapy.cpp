@@ -207,42 +207,13 @@ void CSDRSoapy::process()
   long long timeNs = 0LL;
 
   if (m_soapyInit) {
-    if (m_soapyDeviceType.compare("usrp") == 0) {
-      // Local testing has shown the N210 delivers samples in smaller Ethernet
-      // packets. Collect multiple packets into one larger application buffer
-      // before processing and transmitting. This reduces processing overhead
-      // and prevents unfilled parts of the buffer from being treated as new
-      // sample data.
-      size_t samplesRead = 0U;
-
-      while (samplesRead < m_buffer.size() && m_soapyInit) {
-        void* rxBuffs[1] = {m_buffer.data() + samplesRead};
-        int flags = 0;
-        const int ret = m_device->readStream(
-          m_rxStream, rxBuffs, m_buffer.size() - samplesRead, flags, timeNs);
-
-        if (ret > 0) {
-          samplesRead += static_cast<size_t>(ret);
-        } else {
-          LogError("RX stream error after %zu/%zu samples: %d (%s)",
-                   samplesRead, m_buffer.size(), ret, SoapySDR_errToStr(ret));
-          m_soapyInit = false;
-        }
-      }
-
-      if (m_soapyInit)
-        processIQBlock();
+    int flags = 0;
+    int ret = m_device->readStream(m_rxStream, buffs, m_buffer.size(), flags, timeNs);
+    if (ret > 0) {
+      processIQBlock();
     } else {
-      int flags = 0;
-      const int ret = m_device->readStream(
-        m_rxStream, buffs, m_buffer.size(), flags, timeNs);
-
-      if (ret > 0) {
-        processIQBlock();
-      } else {
-        LogError("RX stream error: %d (%s)", ret, SoapySDR_errToStr(ret));
-        m_soapyInit = false;
-      }
+      LogError("RX stream error: %d (%s)", ret, SoapySDR_errToStr(ret));
+      m_soapyInit = false;
     }
   }
 

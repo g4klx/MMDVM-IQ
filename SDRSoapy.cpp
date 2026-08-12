@@ -530,7 +530,7 @@ uint8_t CSDRSoapy::setParameters()
       devArgs.insert(uriArgs.begin(), uriArgs.end());
     }
 
-    m_timestamped = false;
+    m_timestamped = true;
 
     LogMessage("Using Ettus USRP driver args %s", m_soapyDeviceURI.empty() ? "(default)" : m_soapyDeviceURI.c_str());
   } else if (m_soapyDeviceType.compare("mucell") == 0) {

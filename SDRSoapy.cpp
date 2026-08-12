@@ -492,7 +492,7 @@ uint8_t CSDRSoapy::setParameters()
     resampDen = 125U;
     blockSize = 4096U;
     iqHWDelay = 50U;
-    cutoff = 0.25F;
+    cutoff = 0.45F;
 
     devArgs["driver"] = "uhd";
     

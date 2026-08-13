@@ -162,17 +162,6 @@ bool CSDRSoapy::writeTXBlock(const std::vector<std::complex<float>>& samples, in
   return true;
 }
 
-int CSDRSoapy::readRXSamples(RXSample* rxSamples) {
-  if (m_rxBuffer.dataSize() >= RX_BLOCK_SIZE) {
-    for (uint16_t i = 0U; i < RX_BLOCK_SIZE; i++) {
-      m_rxBuffer.getData(*(rxSamples + i));
-    }
-    return RX_BLOCK_SIZE;
-  }
-
-  return 0;
-}
-
 void CSDRSoapy::process()
 {
   if (!m_started)
@@ -305,13 +294,13 @@ void CSDRSoapy::processIQBlock()
 }
 
 int CSDRSoapy::read(MMDVM_STATE mode, q15_t* samples, uint16_t* rssi, uint8_t* control) {
-  RXSample rxSamples[2];
-
-  if (this->readRXSamples(rxSamples) == RX_BLOCK_SIZE) {
-    for (unsigned int i = 0; i < RX_BLOCK_SIZE; i++) {
-      samples[i] = rxSamples[i].m_sample;
-      rssi[i] = rxSamples->m_rssi;
-      control[i] = rxSamples[i].m_control;
+  if (m_rxBuffer.dataSize() >= RX_BLOCK_SIZE) {
+    for (uint16_t i = 0; i < RX_BLOCK_SIZE; i++) {
+      RXSample rxSample;
+      m_rxBuffer.getData(rxSample);
+      samples[i] = rxSample.m_sample;
+      rssi[i] = rxSample.m_rssi;
+      control[i] = rxSample.m_control;
     }
 
     return RX_BLOCK_SIZE;

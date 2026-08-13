@@ -5,6 +5,7 @@
  *   Copyright (C) 2015 by Jim Mclaughlin KI6ZUM
  *   Copyright (C) 2026 by Adrian Musceac YO8RZZ
  *   Copyright (C) 2026 by Shawn Chain BG5HHP
+ *   Copyright (C) 2026 by Steve Miller KC1AWV
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -501,21 +502,24 @@ uint8_t CSDRSoapy::setParameters()
 
     LogMessage("Using LimeSuiteNG driver uri %s", uri);
   } else if (m_soapyDeviceType.compare("usrp") == 0) {
-    const char* uri = m_soapyDeviceURI.c_str();
-
-    resampNum = 2U;
-    resampDen = 50U;
-    blockSize = 2048U;
+    
+    // Ettus USRP - running 1M SPS
+    resampNum = 3U;
+    resampDen = 125U;
+    blockSize = 4096U;
     iqHWDelay = 50U;
+    cutoff = 0.45F;
 
     devArgs["driver"] = "uhd";
-    rxArgs["uri"]     = uri;
-    txArgs["uri"]     = uri;
-    rxArgs["recv_frame_size"] = "1024";
+    
+    if (!m_soapyDeviceURI.empty()) {
+      const SoapySDR::Kwargs uriArgs = SoapySDR::KwargsFromString(m_soapyDeviceURI);
+      devArgs.insert(uriArgs.begin(), uriArgs.end());
+    }
 
     m_timestamped = true;
 
-    LogMessage("Using Ettus USRP driver uri %s", uri);
+    LogMessage("Using Ettus USRP driver args %s", m_soapyDeviceURI.empty() ? "(default)" : m_soapyDeviceURI.c_str());
   } else if (m_soapyDeviceType.compare("mucell") == 0) {
     // mucell(sx1255) running 150k SPS
     resampNum = 4U;

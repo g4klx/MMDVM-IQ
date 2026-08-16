@@ -111,12 +111,18 @@ uint8_t CFMCTCSSTX::setParams(uint8_t frequency, uint8_t level)
   delete[] m_values;
   m_values = new q15_t[m_length];
 
-  q31_t arg = 0;
-  for (uint16_t i = 0U; i < m_length; i++) {
-    q63_t value = ::arm_sin_q31(arg) * q63_t(level * 13);
-    m_values[i] = q15_t(__SSAT((value >> 31), 16));
+  const float TWO_PI = 6.28318530717958647692F;
+  const float Q31_PHASE_SCALE = 2147483648.0F;
 
-    arg += entry->increment;
+  uint32_t arg = 0U;
+
+  for (uint16_t i = 0U; i < m_length; i++) {
+    float phase = TWO_PI * static_cast<float>(arg) / Q31_PHASE_SCALE;
+    float value = std::sin(phase) * static_cast<float>(level * 13U);
+
+    m_values[i] = q15_t(std::lround(value));
+
+    arg += uint32_t(entry->increment);
   }
 
   return 0U;

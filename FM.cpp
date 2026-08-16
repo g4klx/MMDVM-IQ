@@ -55,6 +55,12 @@ m_needReverse(false),
 m_filterStage1(  724,   1448,   724, 32768, -37895, 21352),//3rd order Cheby Filter 300 to 2700Hz, 0.2dB passband ripple, sampling rate 24kHz
 m_filterStage2(32768,      0,-32768, 32768, -50339, 19052),
 m_filterStage3(32768, -65536, 32768, 32768, -64075, 31460),
+m_dsFilterStage1(m_filterStage1),//same coefficients, separate state
+m_dsFilterStage2(m_filterStage2),
+m_dsFilterStage3(m_filterStage3),
+m_usFilterStage1(m_filterStage1),//same coefficients, separate state
+m_usFilterStage2(m_filterStage2),
+m_usFilterStage3(m_filterStage3),
 m_blanking(),
 m_accessMode(1U),
 m_linkMode(false),
@@ -107,6 +113,7 @@ void CFM::repeaterSamples(q15_t* samples, const uint16_t* rssi, uint8_t length)
 
     q15_t currentExtSample = 0;
     bool inputExt = m_inputExtRB.getSample(currentExtSample);//always consume the external input data so it does not overflow
+    currentExtSample = m_usFilterStage3.filter(m_usFilterStage2.filter(m_usFilterStage1.filter(currentExtSample)));
     inputExt = inputExt && m_extEnabled;
 
     switch (m_accessMode) {
@@ -188,8 +195,10 @@ void CFM::repeaterSamples(q15_t* samples, const uint16_t* rssi, uint8_t length)
     if (m_duplex) {
       if (m_state == FM_STATE::RELAYING_RF || m_state == FM_STATE::KERCHUNK_RF || m_state == FM_STATE::RELAYING_EXT || m_state == FM_STATE::KERCHUNK_EXT) {
         currentSample = m_blanking.process(currentSample);
-        if (m_extEnabled && (m_state == FM_STATE::RELAYING_RF || m_state == FM_STATE::KERCHUNK_RF))
-          m_downSampler.addSample(currentSample);
+        if (m_extEnabled && (m_state == FM_STATE::RELAYING_RF || m_state == FM_STATE::KERCHUNK_RF)) {
+          q15_t dsSample = m_dsFilterStage3.filter(m_dsFilterStage2.filter(m_dsFilterStage1.filter(currentSample)));
+          m_downSampler.addSample(dsSample);
+        }
 
         currentSample *= currentBoost;
       } else {
@@ -199,9 +208,11 @@ void CFM::repeaterSamples(q15_t* samples, const uint16_t* rssi, uint8_t length)
         if (m_state == FM_STATE::RELAYING_EXT || m_state == FM_STATE::KERCHUNK_EXT) {
           currentSample *= currentBoost;
         } else {
-          if (m_extEnabled && (m_state == FM_STATE::RELAYING_RF || m_state == FM_STATE::KERCHUNK_RF))
-            m_downSampler.addSample(currentSample);
-          continue; 
+          if (m_extEnabled && (m_state == FM_STATE::RELAYING_RF || m_state == FM_STATE::KERCHUNK_RF)) {
+            q15_t dsSample = m_dsFilterStage3.filter(m_dsFilterStage2.filter(m_dsFilterStage1.filter(currentSample)));
+            m_downSampler.addSample(dsSample);
+          }
+          continue;
         }
     }
 
@@ -246,7 +257,8 @@ void CFM::linkSamples(q15_t* samples, const uint16_t* rssi, uint8_t length)
     // with the ext-gap debounce below, m_extSignal can now stay true for a
     // few samples past that point
     q15_t currentExtSample = 0;
-    bool inputExt = m_inputExtRB.getSample(currentExtSample);//always consume the external input data so it does not overflow
+    bool inputExt    = m_inputExtRB.getSample(currentExtSample);//always consume the external input data so it does not overflow
+    currentExtSample = m_usFilterStage3.filter(m_usFilterStage2.filter(m_usFilterStage1.filter(currentExtSample)));
     inputExt = inputExt && m_extEnabled;
 
     switch (m_accessMode) {
@@ -316,7 +328,8 @@ void CFM::linkSamples(q15_t* samples, const uint16_t* rssi, uint8_t length)
 
     if (m_rfSignal && m_extEnabled) {
       q15_t currentSample = m_blanking.process(currentRFSample);
-      m_downSampler.addSample(currentSample);
+      q15_t dsSample      = m_dsFilterStage3.filter(m_dsFilterStage2.filter(m_dsFilterStage1.filter(currentSample)));
+      m_downSampler.addSample(dsSample);
     }
 
     if (!m_extSignal)

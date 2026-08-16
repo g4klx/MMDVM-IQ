@@ -26,7 +26,7 @@
 CFMDownSampler::CFMDownSampler(uint16_t length) :
 m_ringBuffer(length, "FM Downsampler Buffer"),
 m_samplePack(0U),
-m_samplePackPointer(NULL),
+m_samplePackPointer(nullptr),
 m_sampleIndex(0U)
 {
   m_samplePackPointer = (uint8_t*)&m_samplePack;

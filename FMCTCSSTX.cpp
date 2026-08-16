@@ -82,7 +82,7 @@ const struct TX_CTCSS_TABLE {
 const uint8_t CTCSS_TABLE_DATA_LEN = 50U;
 
 CFMCTCSSTX::CFMCTCSSTX() :
-m_values(NULL),
+m_values(nullptr),
 m_length(0U),
 m_n(0U)
 {
@@ -94,7 +94,7 @@ CFMCTCSSTX::~CFMCTCSSTX()
 
 uint8_t CFMCTCSSTX::setParams(uint8_t frequency, uint8_t level)
 {
-  const TX_CTCSS_TABLE* entry = NULL;
+  const TX_CTCSS_TABLE* entry = nullptr;
 
   for (uint8_t i = 0U; i < CTCSS_TABLE_DATA_LEN; i++) {
     if (TX_CTCSS_TABLE_DATA[i].frequency == frequency) {
@@ -103,7 +103,7 @@ uint8_t CFMCTCSSTX::setParams(uint8_t frequency, uint8_t level)
     }
   }
 
-  if (entry == NULL)
+  if (entry == nullptr)
     return 4U;
 
   m_length = entry->length;

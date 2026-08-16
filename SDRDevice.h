@@ -32,7 +32,7 @@ public:
 
   virtual void stop() = 0;
 
-  virtual void write(MMDVM_STATE mode, const q15_t* samples, uint16_t length, const uint8_t* control = NULL)  = 0;
+  virtual void write(MMDVM_STATE mode, const q15_t* samples, uint16_t length, const uint8_t* control = nullptr)  = 0;
   virtual int read(MMDVM_STATE mode, q15_t* samples, uint16_t* rssi, uint8_t* control)  = 0;
 
   virtual uint16_t getSpace() const  = 0;

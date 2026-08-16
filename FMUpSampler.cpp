@@ -28,7 +28,7 @@ const uint32_t FM_UPSAMPLE_MASK = 0x00000FFFU;
 CFMUpSampler::CFMUpSampler() :
 m_upSampleIndex(0),
 m_pack(0U),
-m_packPointer(NULL),
+m_packPointer(nullptr),
 m_samples(3600U, "FM Upsampler"), // 300ms of 12 bit 8kHz audio
 m_running(false)
 {

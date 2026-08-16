@@ -52,7 +52,7 @@ public:
 
   void stop();
 
-  void write(MMDVM_STATE mode, const q15_t* samples, uint16_t length, const uint8_t* control = NULL);
+  void write(MMDVM_STATE mode, const q15_t* samples, uint16_t length, const uint8_t* control = nullptr);
 
   uint16_t getSpace() const;
 

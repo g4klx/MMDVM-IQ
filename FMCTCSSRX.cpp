@@ -1,5 +1,6 @@
 /*
  *   Copyright (C) 2020,2026 by Jonathan Naylor G4KLX
+ *   Copyright (C) 2026 by Steve Miller KC1AWV
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -83,13 +84,44 @@ const uint8_t CTCSS_TABLE_DATA_LEN = 50U;
 // 4Hz bandwidth
 const uint16_t N = 24000U / 4U;
 
+const float SAMPLE_RATE          = 24000.0F;
+const float TWO_PI               = 6.28318530717958647692F;
+const float Q31_SCALE            = 2147483648.0F;
+const float GUARD_OFFSET         = 4.0F;
+const float GUARD_DOMINANCE      = 2.0F;
+const float MINIMUM_MEAN_ENERGY  = 0.00000001F;
+const uint8_t VALID_WINDOWS      = 2U;
+const uint8_t INVALID_WINDOWS    = 2U;
+
+static void processGoertzel(float sample, float coeff, float& q1, float& q2)
+{
+  const float q0 = sample + coeff * q1 - q2;
+  q2 = q1;
+  q1 = q0;
+}
+
+static float getGoertzelPower(float coeff, float q1, float q2)
+{
+  const float power = q1 * q1 + q2 * q2 - coeff * q1 * q2;
+  return power > 0.0F ? power : 0.0F;
+}
+
 CFMCTCSSRX::CFMCTCSSRX() :
-m_coeffDivTwo(0),
-m_highThreshold(0),
-m_lowThreshold(0),
+m_coeff(0.0F),
+m_lowerCoeff(0.0F),
+m_upperCoeff(0.0F),
+m_highThreshold(0U),
+m_lowThreshold(0U),
 m_count(0U),
-m_q0(0),
-m_q1(0),
+m_q1(0.0F),
+m_q2(0.0F),
+m_lowerQ1(0.0F),
+m_lowerQ2(0.0F),
+m_upperQ1(0.0F),
+m_upperQ2(0.0F),
+m_inputEnergy(0.0F),
+m_validCount(0U),
+m_invalidCount(0U),
 m_state(false)
 {
 }
@@ -100,74 +132,105 @@ CFMCTCSSRX::~CFMCTCSSRX()
 
 uint8_t CFMCTCSSRX::setParams(uint8_t frequency, uint8_t highThreshold, uint8_t lowThreshold)
 {
-  m_coeffDivTwo = 0;
+  q63_t coeffDivTwo = 0;
 
   for (uint8_t i = 0U; i < CTCSS_TABLE_DATA_LEN; i++) {
     if (RX_CTCSS_TABLE_DATA[i].frequency == frequency) {
-      m_coeffDivTwo = RX_CTCSS_TABLE_DATA[i].coeffDivTwo;
+      coeffDivTwo = RX_CTCSS_TABLE_DATA[i].coeffDivTwo;
       break;
     }
   }
 
-  if (m_coeffDivTwo == 0)
+  if (coeffDivTwo == 0)
     return 4U;
 
-  m_highThreshold = q31_t(highThreshold);
-  m_lowThreshold  = q31_t(lowThreshold);
+  const float targetCos = static_cast<float>(coeffDivTwo) / Q31_SCALE;
+  const float targetAngle = std::acos(targetCos);
+  const float guardAngle = TWO_PI * GUARD_OFFSET / SAMPLE_RATE;
+
+  m_coeff      = 2.0F * targetCos;
+  m_lowerCoeff = 2.0F * std::cos(targetAngle - guardAngle);
+  m_upperCoeff = 2.0F * std::cos(targetAngle + guardAngle);
+
+  m_highThreshold = highThreshold;
+  m_lowThreshold  = lowThreshold;
+
+  reset();
 
   return 0U;
 }
 
 bool CFMCTCSSRX::process(q15_t sample)
 {
-  //get more dynamic into the decoder by multiplying the sample by 1.5
-  q31_t sample31 = q31_t(sample) +  (q31_t(sample) >> 1);
+  const float sampleFloat = static_cast<float>(sample) / 32768.0F;
 
-  q31_t q2 = m_q1;
-  m_q1 = m_q0;
+  processGoertzel(sampleFloat, m_coeff,      m_q1,      m_q2);
+  processGoertzel(sampleFloat, m_lowerCoeff, m_lowerQ1, m_lowerQ2);
+  processGoertzel(sampleFloat, m_upperCoeff, m_upperQ1, m_upperQ2);
 
-  // Q31 multiplication, t3 = m_coeffDivTwo * 2 * m_q1
-  q63_t t1 = m_coeffDivTwo * m_q1;
-  q31_t t2 = __SSAT((t1 >> 31), 31);
-  q31_t t3 = t2 * 2;
-
-  // m_q0 = m_coeffDivTwo * m_q1 * 2 - q2 + sample
-  m_q0 = t3 - q2 + sample31;
+  m_inputEnergy += sampleFloat * sampleFloat;
 
   m_count++;
   if (m_count == N) {
-    // Q31 multiplication, t2 = m_q0 * m_q0
-    q63_t t1 = q63_t(m_q0) * q63_t(m_q0);
-    q31_t t2 = __SSAT((t1 >> 31), 31);
+    const float targetPower = getGoertzelPower(m_coeff, m_q1, m_q2);
+    const float lowerPower  = getGoertzelPower(m_lowerCoeff, m_lowerQ1, m_lowerQ2);
+    const float upperPower  = getGoertzelPower(m_upperCoeff, m_upperQ1, m_upperQ2);
+    const float meanEnergy  = m_inputEnergy / static_cast<float>(N);
 
-    // Q31 multiplication, t4 = m_q0 * m_q0
-    q63_t t3 = q63_t(m_q1) * q63_t(m_q1);
-    q31_t t4 = __SSAT((t3 >> 31), 31);
+    float ratio = 0.0F;
+    if (meanEnergy >= MINIMUM_MEAN_ENERGY)
+      ratio = targetPower / (static_cast<float>(N) * m_inputEnergy);
 
-    // Q31 multiplication, t9 = m_q0 * m_q1 * m_coeffDivTwo * 2
-    q63_t t5 = q63_t(m_q0) * q63_t(m_q1);
-    q31_t t6 = __SSAT((t5 >> 31), 31);
-    q63_t t7 = t6 * m_coeffDivTwo;
-    q31_t t8 = __SSAT((t7 >> 31), 31);
-    q31_t t9  = t8 * 2;
+    // Threshold values are normalized ratios in ten-thousandths.
+    // For example, 150 represents 0.0150.
+    const uint16_t value = static_cast<uint16_t>(std::lround(ratio * 10000.0F));
+    const uint8_t threshold = m_state ? m_lowThreshold : m_highThreshold;
 
-    // value = m_q0 * m_q0 + m_q1 * m_q1 - m_q0 * m_q1 * m_coeffDivTwo * 2
-    q31_t value = t2 + t4 - t9;
+    const bool dominant =
+      targetPower >= lowerPower * GUARD_DOMINANCE &&
+      targetPower >= upperPower * GUARD_DOMINANCE;
+    const bool detected = value >= threshold && dominant;
 
     bool previousState = m_state;
 
-    q31_t threshold = m_highThreshold;
-    if (previousState)
-      threshold = m_lowThreshold;
+    if (detected) {
+      m_invalidCount = 0U;
 
-    m_state = value >= threshold;
+      if (!m_state) {
+        if (m_validCount < VALID_WINDOWS)
+          m_validCount++;
+
+        if (m_validCount >= VALID_WINDOWS) {
+          m_state = true;
+          m_validCount = 0U;
+        }
+      }
+    } else {
+      m_validCount = 0U;
+
+      if (m_state) {
+        if (m_invalidCount < INVALID_WINDOWS)
+          m_invalidCount++;
+
+        if (m_invalidCount >= INVALID_WINDOWS) {
+          m_state = false;
+         m_invalidCount = 0U;
+        }
+      }
+    }
 
     if (previousState != m_state)
-      LogDebug("FM: CTCSS value/threshold/valid: %d/%d/%s", value, threshold, m_state ? "true" : "false");
+      LogDebug("FM: CTCSS value/threshold/dominant/valid: %u/%u/%s/%s",
+        value, threshold, dominant ? "true" : "false", m_state ? "true" : "false");
 
     m_count = 0U;
-    m_q0 = 0;
-    m_q1 = 0;
+    m_q1 = 0.0F;
+    m_q2 = 0.0F;
+    m_lowerQ1 = 0.0F;
+    m_lowerQ2 = 0.0F;
+    m_upperQ1 = 0.0F;
+    m_upperQ2 = 0.0F;
+    m_inputEnergy = 0.0F;
   }
 
   return m_state;
@@ -175,8 +238,15 @@ bool CFMCTCSSRX::process(q15_t sample)
 
 void CFMCTCSSRX::reset()
 {
-  m_q0 = 0;
-  m_q1 = 0;
+  m_q1 = 0.0F;
+  m_q2 = 0.0F;
+  m_lowerQ1 = 0.0F;
+  m_lowerQ2 = 0.0F;
+  m_upperQ1 = 0.0F;
+  m_upperQ2 = 0.0F;
+  m_inputEnergy = 0.0F;
+  m_validCount = 0U;
+  m_invalidCount = 0U;
   m_state = false;
   m_count = 0U;
 }

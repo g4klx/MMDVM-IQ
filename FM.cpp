@@ -1,5 +1,6 @@
 /*
  *   Copyright (C) 2020,2021,2026 by Jonathan Naylor G4KLX
+ *   Copyright (C) 2026 by Steve Miller KC1AWV
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -70,7 +71,7 @@ m_downSampler(400U),// 100 ms of audio
 m_extEnabled(false),
 m_txLevel(128 * 128),
 m_rxLevel(1),
-m_inputRFRB(2401U, "FM Input Buffer"),   // 100ms of audio + 1 sample
+m_inputRFRB(2402U, "FM Input Buffer"),   // 100ms of audio + 1 sample
 m_outputRFRB(2400U, "FM Output Buffer"),  // 100ms of audio
 m_inputExtRB(),
 m_rfSignal(false),
@@ -442,7 +443,7 @@ uint8_t CFM::setAck(const char* rfAck, uint8_t speed, uint16_t frequency, uint8_
   return m_rfAck.setParams(rfAck, speed, frequency, level, level);
 }
 
-uint8_t CFM::setMisc(uint16_t timeout, uint8_t timeoutLevel, uint8_t ctcssFrequency, uint8_t ctcssHighThreshold, uint8_t ctcssLowThreshold, uint8_t ctcssLevel, uint8_t kerchunkTime, uint8_t hangTime, uint8_t accessMode, bool linkMode, uint8_t squelchHighThreshold, uint8_t squelchLowThreshold, uint8_t rfAudioBoost, uint8_t maxDev, uint8_t rxLevel)
+uint8_t CFM::setMisc(uint16_t timeout, uint8_t timeoutLevel, uint8_t ctcssFrequency, uint8_t ctcssHighThreshold, uint8_t ctcssLowThreshold, uint8_t ctcssLevel, uint8_t kerchunkTime, uint8_t hangTime, uint8_t accessMode, bool linkMode, bool cosInvert, uint8_t squelchHighThreshold, uint8_t squelchLowThreshold, uint8_t rfAudioBoost, uint8_t maxDev, uint8_t rxLevel)
 {
   m_accessMode   = accessMode;
   m_linkMode     = linkMode;
@@ -460,7 +461,7 @@ uint8_t CFM::setMisc(uint16_t timeout, uint8_t timeoutLevel, uint8_t ctcssFreque
 
   m_rxLevel = rxLevel; //q15_t(255)/q15_t(rxLevel >> 1);
 
-  m_squelch.setParams(squelchHighThreshold, squelchLowThreshold);
+  m_squelch.setParams(squelchHighThreshold, squelchLowThreshold, cosInvert);
 
   uint8_t ret = m_ctcssRX.setParams(ctcssFrequency, ctcssHighThreshold, ctcssLowThreshold);
   if (ret != 0U)
@@ -752,8 +753,10 @@ void CFM::relayingRFStateDuplex(bool validSignal)
 
     m_ackDelayTimer.start();
 
-    if (m_extEnabled)
+    if (m_extEnabled) {
+      m_downSampler.reset();
       serial.writeFMEOT();
+    }
   }
 
   if (m_callsignTimer.isRunning() && m_callsignTimer.hasExpired()) {

@@ -1,5 +1,6 @@
 /*
  *   Copyright (C) 2020,2026 by Jonathan Naylor G4KLX
+ *   Copyright (C) 2026 by Steve Miller KC1AWV
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -35,12 +36,21 @@ public:
   void reset();
 
 private:
-  q63_t    m_coeffDivTwo;
-  q31_t    m_highThreshold;
-  q31_t    m_lowThreshold;
+  float    m_coeff;
+  float    m_lowerCoeff;
+  float    m_upperCoeff;
+  uint8_t  m_highThreshold;
+  uint8_t  m_lowThreshold;
   uint16_t m_count;
-  q31_t    m_q0;
-  q31_t    m_q1;
+  float    m_q1;
+  float    m_q2;
+  float    m_lowerQ1;
+  float    m_lowerQ2;
+  float    m_upperQ1;
+  float    m_upperQ2;
+  float    m_inputEnergy;
+  uint8_t  m_validCount;
+  uint8_t  m_invalidCount;
   bool     m_state;
 };
 

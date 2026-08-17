@@ -169,7 +169,7 @@ void CSDRMulti::process()
 int CSDRMulti::read(MMDVM_STATE mode, q15_t* samples, uint16_t* rssi, uint8_t* control) {
   if (m_rxNetworkBuffer.dataSize() >= RX_BLOCK_SIZE) {
     for (unsigned int i = 0; i < RX_BLOCK_SIZE; i++) {
-      RXSample rxSample;
+      RXSample rxSample{};
       m_rxNetworkBuffer.getData(rxSample);
       samples[i] = rxSample.m_sample;
       rssi[i] = rxSample.m_rssi;

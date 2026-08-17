@@ -1,5 +1,6 @@
 /*
  *   Copyright (C) 2020,2026 by Jonathan Naylor G4KLX
+ *   Copyright (C) 2026 by Steve Miller KC1AWV
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -31,7 +32,9 @@ CFMSquelch::CFMSquelch() :
 m_highThreshold(0U),
 m_lowThreshold(0U),
 m_count(0U),
-m_state(false)
+m_state(false),
+m_invert(false),
+m_configured(false)
 {
 }
 
@@ -39,37 +42,66 @@ CFMSquelch::~CFMSquelch()
 {
 }
 
-void CFMSquelch::setParams(uint8_t highThreshold, uint8_t lowThreshold)
+void CFMSquelch::setParams(uint8_t highThreshold, uint8_t lowThreshold, bool invert)
 {
 	m_highThreshold = highThreshold;
 	m_lowThreshold  = lowThreshold;
+	m_invert = invert;
+
+	m_count = 0U;
+	m_state = false;
+	m_configured = true;
+
+	LogDebug("FM: squelch parameters high/low/invert: %u/%u/%s",
+		m_highThreshold,
+		m_lowThreshold,
+		m_invert ? "true" : "false");
 }
 
 bool CFMSquelch::process(uint16_t rssi)
 {
+	if (!m_configured)
+		return false;
+	const bool close = m_invert ?
+		rssi >= m_highThreshold :
+		rssi <= m_lowThreshold;
+
+	const bool open = m_invert ?
+		rssi <= m_lowThreshold :
+		rssi >= m_highThreshold;
+
 	if (m_state) {
-		if (rssi <= m_lowThreshold) {
-			m_count--;
+		if (close) {
+			if (m_count > 0U)
+				m_count--;
 
 			if (m_count == 0U) {
-				LogDebug("FM: squelch closed");
+				LogDebug("FM: squelch closed, RSSI: %u", rssi);
 				m_state = false;
 			}
 		} else {
 			m_count = MAX_COUNT;
 		}
 	} else {
-		if (rssi >= m_highThreshold) {
+		if (open) {
 			m_count++;
 
 			if (m_count >= MAX_COUNT) {
-				LogDebug("FM: squelch open");
+				LogDebug("FM: squelch open, RSSI: %u", rssi);
 				m_state = true;
 			}
+		} else {
+			m_count = 0U;
 		}
 	}
 
 	return m_state;
+}
+
+void CFMSquelch::reset()
+{
+	m_count = 0U;
+	m_state = false;
 }
 
 #endif

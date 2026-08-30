@@ -23,6 +23,7 @@
 #include "Globals.h"
 #include "Version.h"
 #include "Thread.h"
+#include "Conf.h"
 #include "Log.h"
 #include "GitVersion.h"
 
@@ -174,7 +175,7 @@ int main(int argc, char** argv)
 }
 
 CMMDVMIQ::CMMDVMIQ(const std::string& filename) :
-m_conf(filename)
+m_filename(filename)
 {
 }
 
@@ -184,22 +185,23 @@ CMMDVMIQ::~CMMDVMIQ()
 
 int CMMDVMIQ::run()
 {
-    bool ret = m_conf.read();
+    CConf conf(m_filename);
+
+    bool ret = conf.read();
     if (!ret) {
         ::fprintf(stderr, "MMDVM-IQ: cannot read the .ini file\n");
         return 1;
     }
 
 #if !defined(_WIN32) && !defined(_WIN64)
-    bool m_daemon = m_conf.getDaemon();
+    bool m_daemon = conf.getDaemon();
     if (m_daemon) {
         // Create new process
         pid_t pid = ::fork();
         if (pid == -1) {
             ::fprintf(stderr, "Couldn't fork() , exiting\n");
             return -1;
-        }
-        else if (pid != 0) {
+        } else if (pid != 0) {
             exit(EXIT_SUCCESS);
         }
 
@@ -245,10 +247,10 @@ int CMMDVMIQ::run()
         }
     }
 #endif
-    ::LogInitialise(m_conf.getLogDisplayLevel(), m_conf.getLogMQTTLevel());
+    ::LogInitialise(conf.getLogDisplayLevel(), conf.getLogMQTTLevel());
 
     std::vector<std::pair<std::string, void (*)(const unsigned char*, unsigned int)>> subscriptions;
-    m_mqtt = new CMQTTConnection(m_conf.getMQTTHost(), m_conf.getMQTTPort(), m_conf.getMQTTName(), m_conf.getMQTTAuthEnabled(), m_conf.getMQTTUsername(), m_conf.getMQTTPassword(), subscriptions, m_conf.getMQTTKeepalive());
+    m_mqtt = new CMQTTConnection(conf.getMQTTHost(), conf.getMQTTPort(), conf.getMQTTName(), conf.getMQTTAuthEnabled(), conf.getMQTTUsername(), conf.getMQTTPassword(), subscriptions, conf.getMQTTKeepalive());
     ret = m_mqtt->open();
     if (!ret) {
         ::fprintf(stderr, "MMDVM-IQ: unable to start the MQTT Publisher\n");
@@ -256,22 +258,23 @@ int CMMDVMIQ::run()
         m_mqtt = nullptr;
     }
 
-    ret = serial.start(m_conf.getNetworkLocalAddress(), m_conf.getNetworkLocalPort(),
-                            m_conf.getNetworkHostAddress(), m_conf.getNetworkHostPort(),
-                            m_conf.getNetworkTrace());
+    ret = serial.start(conf.getLocalAddress(), conf.getLocalPort(), conf.getHostAddress(), conf.getHostPort(), conf.getTrace());
     if (!ret) {
         LogError("Unable to open the host network connection");
         return 1;
     }
 
-    bool modeMulti = m_conf.getMultiModem();
-    if (modeMulti)
-        io.setMultiModemAddress(m_conf.getMultiModemLocalAddress(), m_conf.getMultiModemLocalPort(),
-                                     m_conf.getMultiModemAddress(), m_conf.getMultiModemPort());
-    else
-        io.setSoapyDeviceInfo(m_conf.getModemType(), m_conf.getModemURI(), m_conf.getRxGain(), m_conf.getTxGain());
+    std::string driver = conf.getModemDriver();
+    if (driver == "Soapy") {
+        io.setMultiModemAddress(conf.getMultiLocalAddress(), conf.getMultiLocalPort(), conf.getMultiModemAddress(), conf.getMultiModemPort());
+    } else if (driver == "Multi") {
+        io.setSoapyDeviceInfo(conf.getSoapyType(), conf.getSoapyURI(), conf.getSoapyRXGain(), conf.getSoapyTXGain());
+    } else {
+        LogError("Unknown modem driver of type \"%s\"", driver.c_str());
+        return 1;
+    }
 
-    ret = io.start(m_conf.getModemTrace());
+    ret = io.start(conf.getModemTrace());
     if (!ret) {
         LogError("Unable to open the modem");
         return 1;
@@ -328,7 +331,7 @@ int CMMDVMIQ::run()
         if (m_modemState == MMDVM_STATE::IDLE)
             cwIdTX.process();
 
-        if (modeMulti)
+        if (driver == "Multi")
             CThread::sleep(1U);
     }
 

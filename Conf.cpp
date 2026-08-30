@@ -31,9 +31,10 @@ enum class SECTION {
 	GENERAL,
 	LOG,
 	MQTT,
+	HOST,
 	MODEM,
-	MMDVM_HOST,
-	MMDVM_MULTI
+	SOAPY,
+	MULTI
 };
 
 CConf::CConf(const std::string& file) :
@@ -48,19 +49,21 @@ m_mqttName("mmdvm-iq"),
 m_mqttAuthEnabled(false),
 m_mqttUsername(),
 m_mqttPassword(),
-m_modemType("sx"),
-m_modemURI(),
+m_hostAddress("127.0.0.1"),
+m_hostPort(3335U),
+m_localAddress("127.0.0.1"),
+m_localPort(3334U),
+m_trace(false),
+m_modemDriver("Soapy"),
 m_modemTrace(false),
-m_networkHostAddress("127.0.0.1"),
-m_networkHostPort(3335U),
-m_networkLocalAddress("127.0.0.1"),
-m_networkLocalPort(3334U),
-m_networkTrace(false),
-m_multiModem(false),
+m_soapyType("sx"),
+m_soapyURI(),
+m_soapyRXGain(0U),
+m_soapyTXGain(0U),
 m_multiModemAddress("127.0.0.1"),
 m_multiModemPort(48200),
-m_multiModemLocalAddress("127.0.0.1"),
-m_multiModemLocalPort(48100)
+m_multiLocalAddress("127.0.0.1"),
+m_multiLocalPort(48100)
 {
 }
 
@@ -90,12 +93,14 @@ bool CConf::read()
 				section = SECTION::LOG;
 			else if (::strncmp(buffer, "[MQTT]", 6U) == 0)
 				section = SECTION::MQTT;
+			else if (::strncmp(buffer, "[Host]", 6U) == 0)
+				section = SECTION::HOST;
 			else if (::strncmp(buffer, "[Modem]", 7U) == 0)
 				section = SECTION::MODEM;
-			else if (::strncmp(buffer, "[MMDVM Host]", 12U) == 0)
-				section = SECTION::MMDVM_HOST;
-			else if (::strncmp(buffer, "[MMDVM Multi]", 13U) == 0)
-				section = SECTION::MMDVM_MULTI;
+			else if (::strncmp(buffer, "[Soapy]", 7U) == 0)
+				section = SECTION::SOAPY;
+			else if (::strncmp(buffer, "[Multi]", 7U) == 0)
+				section = SECTION::MULTI;
 			else
 				section = SECTION::NONE;
 
@@ -150,39 +155,40 @@ bool CConf::read()
 				m_mqttUsername = value;
 			else if (::strcmp(key, "Password") == 0)
 				m_mqttPassword = value;
-		} else if (section == SECTION::MODEM) {
-			if (::strcmp(key, "Trace") == 0)
-				m_modemTrace = ::atoi(value) == 1;
-			else if (::strcmp(key, "Type") == 0)
-				m_modemType = value;
-			else if (::strcmp(key, "URI") == 0)
-				m_modemURI = value;
-			else if (::strcmp(key, "RxGain") == 0)
-				m_rxGain = (unsigned int)::atoi(value);
-			else if (::strcmp(key, "TxGain") == 0)
-				m_txGain = (unsigned int)::atoi(value);
-		} else if (section == SECTION::MMDVM_HOST) {
+		} else if (section == SECTION::HOST) {
 			if (::strcmp(key, "HostAddress") == 0)
-				m_networkHostAddress = value;
+				m_hostAddress = value;
 			else if (::strcmp(key, "HostPort") == 0)
-				m_networkHostPort = (unsigned short)::atoi(value);
+				m_hostPort = (unsigned short)::atoi(value);
 			else if (::strcmp(key, "LocalAddress") == 0)
-				m_networkLocalAddress = value;
+				m_localAddress = value;
 			else if (::strcmp(key, "LocalPort") == 0)
-				m_networkLocalPort = (unsigned short)::atoi(value);
+				m_localPort = (unsigned short)::atoi(value);
 			else if (::strcmp(key, "Trace") == 0)
-				m_networkTrace = ::atoi(value) == 1;
-		} else if (section == SECTION::MMDVM_MULTI) {
-			if (::strcmp(key, "Enabled") == 0)
-				m_multiModem = ::atoi(value) == 1;
-			else if (::strcmp(key, "MultiModemAddress") == 0)
+				m_trace = ::atoi(value) == 1;
+		} else if (section == SECTION::MODEM) {
+			if (::strcmp(key, "Driver") == 0)
+				m_modemDriver = value;
+			else if (::strcmp(key, "Trace") == 0)
+				m_modemTrace = ::atoi(value) == 1;
+		} else if (section == SECTION::SOAPY) {
+			if (::strcmp(key, "Type") == 0)
+				m_soapyType = value;
+			else if (::strcmp(key, "URI") == 0)
+				m_soapyURI = value;
+			else if (::strcmp(key, "RxGain") == 0)
+				m_soapyRXGain = (unsigned int)::atoi(value);
+			else if (::strcmp(key, "TxGain") == 0)
+				m_soapyTXGain = (unsigned int)::atoi(value);
+		} else if (section == SECTION::MULTI) {
+			if (::strcmp(key, "ModemAddress") == 0)
 				m_multiModemAddress = value;
-			else if (::strcmp(key, "MultiModemPort") == 0)
+			else if (::strcmp(key, "ModemPort") == 0)
 				m_multiModemPort = (unsigned short)::atoi(value);
 			else if (::strcmp(key, "LocalAddress") == 0)
-				m_multiModemLocalAddress = value;
+				m_multiLocalAddress = value;
 			else if (::strcmp(key, "LocalPort") == 0)
-				m_multiModemLocalPort = (unsigned short)::atoi(value);
+				m_multiLocalPort = (unsigned short)::atoi(value);
 		}
 	}
 
@@ -241,56 +247,59 @@ std::string CConf::getMQTTPassword() const
 	return m_mqttPassword;
 }
 
-std::string CConf::getModemType() const
+std::string CConf::getHostAddress() const
 {
-	return m_modemType;
+	return m_hostAddress;
 }
 
-std::string CConf::getModemURI() const
+unsigned short CConf::getHostPort() const
 {
-	return m_modemURI;
+	return m_hostPort;
 }
 
-unsigned int CConf::getRxGain() const
+std::string CConf::getLocalAddress() const
 {
-	return m_rxGain;
+	return m_localAddress;
 }
 
-unsigned int CConf::getTxGain() const
+unsigned short CConf::getLocalPort() const
 {
-	return m_txGain;
+	return m_localPort;
 }
 
+bool CConf::getTrace() const
+{
+	return m_trace;
+}
 
+std::string CConf::getModemDriver() const
+{
+	return m_modemDriver;
+}
 
 bool CConf::getModemTrace() const
 {
 	return m_modemTrace;
 }
 
-std::string CConf::getNetworkHostAddress() const
+std::string CConf::getSoapyType() const
 {
-	return m_networkHostAddress;
+	return m_soapyType;
 }
 
-unsigned short CConf::getNetworkHostPort() const
+std::string CConf::getSoapyURI() const
 {
-	return m_networkHostPort;
+	return m_soapyURI;
 }
 
-std::string CConf::getNetworkLocalAddress() const
+unsigned int CConf::getSoapyRXGain() const
 {
-	return m_networkLocalAddress;
+	return m_soapyRXGain;
 }
 
-unsigned short CConf::getNetworkLocalPort() const
+unsigned int CConf::getSoapyTXGain() const
 {
-	return m_networkLocalPort;
-}
-
-bool CConf::getNetworkTrace() const
-{
-	return m_networkTrace;
+	return m_soapyTXGain;
 }
 
 std::string CConf::getMultiModemAddress() const
@@ -303,17 +312,12 @@ unsigned short CConf::getMultiModemPort() const
 	return m_multiModemPort;
 }
 
-std::string CConf::getMultiModemLocalAddress() const
+std::string CConf::getMultiLocalAddress() const
 {
-	return m_multiModemLocalAddress;
+	return m_multiLocalAddress;
 }
 
-unsigned short CConf::getMultiModemLocalPort() const
+unsigned short CConf::getMultiLocalPort() const
 {
-	return m_multiModemLocalPort;
-}
-
-bool CConf::getMultiModem() const
-{
-	return m_multiModem;
+	return m_multiLocalPort;
 }

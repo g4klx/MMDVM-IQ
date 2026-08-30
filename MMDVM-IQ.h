@@ -19,8 +19,6 @@
 #if !defined(MMDVM_IQ_H)
 #define	MMDVM_IQ_H
 
-#include "Conf.h"
-
 #include <string>
 
 class CMMDVMIQ {
@@ -31,7 +29,7 @@ public:
 	int run();
 
 private:
-	CConf m_conf;
+	std::string m_filename;
 };
 
 #endif

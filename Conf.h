@@ -46,26 +46,28 @@ public:
     std::string    getMQTTUsername() const;
     std::string    getMQTTPassword() const;
 
+	// The Host section
+	std::string    getHostAddress() const;
+	unsigned short getHostPort() const;
+	std::string    getLocalAddress() const;
+	unsigned short getLocalPort() const;
+	bool           getTrace() const;
+
 	// The Modem section
-	std::string  getModemType() const;
-	std::string  getModemURI() const;
-	unsigned int getRxGain() const;
-	unsigned int getTxGain() const;
+	std::string  getModemDriver() const;
 	bool         getModemTrace() const;
 
-	// The MMDVMHost section
-	std::string    getNetworkHostAddress() const;
-	unsigned short getNetworkHostPort() const;
-	std::string    getNetworkLocalAddress() const;
-	unsigned short getNetworkLocalPort() const;
-	bool           getNetworkTrace() const;
+	// The Soapy section
+	std::string  getSoapyType() const;
+	std::string  getSoapyURI() const;
+	unsigned int getSoapyRXGain() const;
+	unsigned int getSoapyTXGain() const;
 
-	// The MMDVM Multi section
+	// The MMDVM-Multi section
 	std::string    getMultiModemAddress() const;
 	unsigned short getMultiModemPort() const;
-	std::string    getMultiModemLocalAddress() const;
-	unsigned short getMultiModemLocalPort() const;
-	bool           getMultiModem() const;
+	std::string    getMultiLocalAddress() const;
+	unsigned short getMultiLocalPort() const;
 
 private:
 	std::string m_file;
@@ -83,23 +85,24 @@ private:
 	std::string  m_mqttUsername;
 	std::string  m_mqttPassword;
 
-	std::string  m_modemType;
-	std::string  m_modemURI;
-	unsigned int m_rxGain;
-	unsigned int m_txGain;
+	std::string    m_hostAddress;
+	unsigned short m_hostPort;
+	std::string    m_localAddress;
+	unsigned short m_localPort;
+	bool           m_trace;
+
+	std::string  m_modemDriver;
 	bool         m_modemTrace;
 
-	std::string  m_networkHostAddress;
-	unsigned short m_networkHostPort;
-	std::string  m_networkLocalAddress;
-	unsigned short m_networkLocalPort;
-	bool         m_networkTrace;
+	std::string  m_soapyType;
+	std::string  m_soapyURI;
+	unsigned int m_soapyRXGain;
+	unsigned int m_soapyTXGain;
 
-	bool         m_multiModem;
-	std::string  m_multiModemAddress;
+	std::string    m_multiModemAddress;
 	unsigned short m_multiModemPort;
-	std::string  m_multiModemLocalAddress;
-	unsigned short m_multiModemLocalPort;
+	std::string    m_multiLocalAddress;
+	unsigned short m_multiLocalPort;
 };
 
 #endif

@@ -266,9 +266,9 @@ int CMMDVMIQ::run()
 
     std::string driver = conf.getModemDriver();
     if (driver == "Soapy") {
-        io.setMultiModemAddress(conf.getMultiLocalAddress(), conf.getMultiLocalPort(), conf.getMultiModemAddress(), conf.getMultiModemPort());
-    } else if (driver == "Multi") {
         io.setSoapyDeviceInfo(conf.getSoapyType(), conf.getSoapyURI(), conf.getSoapyRXGain(), conf.getSoapyTXGain());
+    } else if (driver == "Multi") {
+        io.setMultiModemAddress(conf.getMultiLocalAddress(), conf.getMultiLocalPort(), conf.getMultiModemAddress(), conf.getMultiModemPort());
     } else {
         LogError("Unknown modem driver of type \"%s\"", driver.c_str());
         return 1;

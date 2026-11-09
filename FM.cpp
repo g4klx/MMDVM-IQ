@@ -59,9 +59,6 @@ m_filterStage3(32768, -65536, 32768, 32768, -64075, 31460),
 m_dsFilterStage1(m_filterStage1),//same coefficients, separate state
 m_dsFilterStage2(m_filterStage2),
 m_dsFilterStage3(m_filterStage3),
-m_usFilterStage1(m_filterStage1),//same coefficients, separate state
-m_usFilterStage2(m_filterStage2),
-m_usFilterStage3(m_filterStage3),
 m_blanking(),
 m_accessMode(1U),
 m_linkMode(false),
@@ -114,7 +111,6 @@ void CFM::repeaterSamples(q15_t* samples, const uint16_t* rssi, uint8_t length)
 
     q15_t currentExtSample = 0;
     bool inputExt = m_inputExtRB.getSample(currentExtSample);//always consume the external input data so it does not overflow
-    currentExtSample = m_usFilterStage3.filter(m_usFilterStage2.filter(m_usFilterStage1.filter(currentExtSample)));
     inputExt = inputExt && m_extEnabled;
 
     switch (m_accessMode) {
@@ -259,7 +255,6 @@ void CFM::linkSamples(q15_t* samples, const uint16_t* rssi, uint8_t length)
     // few samples past that point
     q15_t currentExtSample = 0;
     bool inputExt    = m_inputExtRB.getSample(currentExtSample);//always consume the external input data so it does not overflow
-    currentExtSample = m_usFilterStage3.filter(m_usFilterStage2.filter(m_usFilterStage1.filter(currentExtSample)));
     inputExt = inputExt && m_extEnabled;
 
     switch (m_accessMode) {
@@ -409,7 +404,11 @@ void CFM::reset()
   m_inputExtRB.reset();
 
   m_downSampler.reset();
-  
+  m_dsFilterStage1.reset();
+  m_dsFilterStage2.reset();
+  m_dsFilterStage3.reset();
+  m_squelch.reset();
+
   m_needReverse = false;
   m_rfSignal    = false;
   m_extSignal   = false;

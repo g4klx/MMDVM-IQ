@@ -37,8 +37,8 @@ const unsigned int MULTIMODEM_PACKET_SIZE = SAMPLES_TO_NETWORK * 3U + 8U;
 
 CSDRMulti::CSDRMulti() :
 m_trace(false),
-m_rxNetworkBuffer(721U, "MMDVM-Multi RX Buffer"),
-m_txNetworkBuffer(722U, "MMDVM-Multi TX Buffer"),
+m_rxNetworkBuffer(SAMPLES_TO_NETWORK * 1U + 1U, "MMDVM-Multi RX Buffer"),
+m_txNetworkBuffer(SAMPLES_TO_NETWORK * 2U + 2U, "MMDVM-Multi TX Buffer"),
 m_multiModemSocket(),
 m_myAddress("127.0.0.1"),
 m_myPort(48100),

@@ -29,6 +29,8 @@ const uint16_t POCSAG_PREAMBLE_LENGTH_BYTES = 18U * sizeof(uint32_t);
 
 const uint16_t POCSAG_RADIO_SYMBOL_LENGTH = 20U;
 
+const uint16_t POCSAG_MULTI_DATA_LENGTH = 20U;
+
 const q15_t POCSAG_LEVEL1[] = { 3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875,  3875};
 const q15_t POCSAG_LEVEL0[] = {-3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875, -3875};
 
@@ -38,7 +40,8 @@ const uint16_t SHAPING_FILTER_LEN = 6U;
 const uint8_t POCSAG_SYNC = 0xAAU;
 
 CPOCSAGTX::CPOCSAGTX() :
-m_buffer(4000U, "POCSAG TX Buffer"),
+m_inBuffer(4000U, "POCSAG Input Buffer"),
+m_outBuffer(500U, "POCSAG Output Buffer"),
 m_modFilter(),
 m_modState(),
 m_poBuffer(),
@@ -59,7 +62,7 @@ CPOCSAGTX::~CPOCSAGTX()
 
 void CPOCSAGTX::process()
 {
-  if (m_buffer.isEmpty() && m_poLen == 0U)
+  if (m_inBuffer.isEmpty() && m_poLen == 0U)
     return;
 
   if (m_poLen == 0U) {
@@ -68,14 +71,14 @@ void CPOCSAGTX::process()
         m_poBuffer[m_poLen++] = POCSAG_SYNC;
     } else {
       for (uint8_t i = 0U; i < POCSAG_FRAME_LENGTH_BYTES; i++)
-        m_buffer.getData(m_poBuffer[m_poLen++]);
+        m_inBuffer.getData(m_poBuffer[m_poLen++]);
     }
 
     m_poPtr = 0U;
   }
 
   if (m_poLen > 0U) {
-    uint16_t space = io.getSpace();
+    unsigned int space = m_outBuffer.freeSpace();
     
     while (space > (8U * POCSAG_RADIO_SYMBOL_LENGTH)) {
       uint8_t c = m_poBuffer[m_poPtr++];
@@ -86,15 +89,29 @@ void CPOCSAGTX::process()
       if (m_poPtr >= m_poLen) {
         m_poPtr = 0U;
         m_poLen = 0U;
-        return;
+        break;
       }
     }
+  }
+  
+  // Feed the POCSAG data out to the SDR in blocks of POCSAG_MULTI_DATA_LENGTH samples.
+  uint16_t ioSpace     = io.getSpace();
+  unsigned int outData = m_outBuffer.dataSize();
+
+  while ((ioSpace >= POCSAG_MULTI_DATA_LENGTH) && (outData >= POCSAG_MULTI_DATA_LENGTH)) {
+    q15_t buffer[POCSAG_MULTI_DATA_LENGTH];
+    m_outBuffer.getData(buffer, POCSAG_MULTI_DATA_LENGTH);
+
+    io.write(MMDVM_STATE::POCSAG, buffer, POCSAG_MULTI_DATA_LENGTH);
+
+    ioSpace -= POCSAG_MULTI_DATA_LENGTH;
+    outData -= POCSAG_MULTI_DATA_LENGTH;
   }
 }
 
 bool CPOCSAGTX::busy()
 {
-  if (m_poLen > 0U || m_buffer.hasData())
+  if (m_poLen > 0U || m_inBuffer.hasData())
     return true;
   else
     return false;
@@ -105,11 +122,11 @@ uint8_t CPOCSAGTX::writeData(const uint8_t* data, uint16_t length)
   if (length != POCSAG_FRAME_LENGTH_BYTES)
     return 4U;
 
-  uint16_t space = m_buffer.freeSpace();
+  uint16_t space = m_inBuffer.freeSpace();
   if (space < POCSAG_FRAME_LENGTH_BYTES)
     return 5U;
 
-  m_buffer.addData(data, POCSAG_FRAME_LENGTH_BYTES);
+  m_inBuffer.addData(data, POCSAG_FRAME_LENGTH_BYTES);
 
   return 0U;
 }
@@ -135,7 +152,7 @@ void CPOCSAGTX::writeByte(uint8_t c)
 
   ::arm_fir_fast_q15(&m_modFilter, inBuffer, outBuffer, POCSAG_RADIO_SYMBOL_LENGTH * 8U);
 
-  io.write(MMDVM_STATE::POCSAG, outBuffer, POCSAG_RADIO_SYMBOL_LENGTH * 8U);
+  m_outBuffer.addData(outBuffer, POCSAG_RADIO_SYMBOL_LENGTH * 8U);
 }
 
 void CPOCSAGTX::setTXDelay(uint8_t delay)
@@ -148,7 +165,7 @@ void CPOCSAGTX::setTXDelay(uint8_t delay)
 
 uint8_t CPOCSAGTX::getSpace() const
 {
-  return m_buffer.freeSpace() / POCSAG_FRAME_LENGTH_BYTES;
+  return m_inBuffer.freeSpace() / POCSAG_FRAME_LENGTH_BYTES;
 }
 
 #endif
